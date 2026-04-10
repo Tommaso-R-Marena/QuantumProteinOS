@@ -28,14 +28,14 @@ jobs:
         run: python benchmarks/disorder/run.py --full
       - name: Assert AUC >= 0.82
         run: |
-          python -c "
+          python - <<'PYEOF'
           import json
           with open('benchmarks/disorder/results/metrics.json') as f:
               m = json.load(f)
           auc = m['auc_roc']
           assert auc >= 0.82, f'DisorderNet full AUC {auc:.3f} below 0.82'
           print(f'PASS: DisorderNet full AUC = {auc:.3f}')
-          "
+          PYEOF
       - name: Upload results
         uses: actions/upload-artifact@v4
         with:
@@ -60,9 +60,11 @@ jobs:
           pip install requests
       - name: Run rotamer full benchmark (real PDB QUBOs)
         run: python benchmarks/rotamer_packing/run.py --full
+      # Use heredoc (<<'PYEOF') to avoid ALL shell quoting issues with
+      # single-quoted dict keys and f-strings inside python -c.
       - name: Assert IWS-QAOA beats greedy on all real instances
         run: |
-          python -c "
+          python - <<'PYEOF'
           import json
           with open('benchmarks/rotamer_packing/results/comparison_table.json') as f:
               m = json.load(f)
@@ -72,8 +74,8 @@ jobs:
               assert inst['iws_qaoa_gap_pct'] <= inst['greedy_gap_pct'], (
                   f"{inst['name']}: IWS gap {inst['iws_qaoa_gap_pct']:.1f}% > greedy gap {inst['greedy_gap_pct']:.1f}%"
               )
-              print(f\"PASS {inst['name']} (N={inst['N_residues']}): IWS {inst['iws_qaoa_gap_pct']:.1f}% <= greedy {inst['greedy_gap_pct']:.1f}%\")
-          "
+              print(f"PASS {inst['name']} (N={inst['N_residues']}): IWS {inst['iws_qaoa_gap_pct']:.1f}% <= greedy {inst['greedy_gap_pct']:.1f}%")
+          PYEOF
       - name: Upload results
         uses: actions/upload-artifact@v4
         with:
@@ -98,67 +100,79 @@ jobs:
           pip install requests biopython
 
       # ------------------------------------------------------------------
-      # Network connectivity check — diagnose before we try to download
-      # ------------------------------------------------------------------
-      - name: Debug network access to AlphaFold DB
-        run: |
-          echo "=== curl HEAD test ==="
-          curl -v --max-time 15 -o /dev/null \
-            https://alphafold.ebi.ac.uk/files/AF-P12931-F1-model_v4.cif \
-            2>&1 | head -40 || true
-
-      # ------------------------------------------------------------------
-      # Pre-download all 22 AF mmCIF structures via curl.
-      # curl uses the system CA bundle and does not go through Python's
-      # requests/urllib3 SSL stack, which can behave differently in CI.
-      # Files land in tests/fixtures/alphafold/ where run.py will find
-      # them as cached hits (skipping HTTP entirely).
+      # Pre-download all AF mmCIF structures via curl.
+      # -f  = fail (exit non-zero) on HTTP 4xx/5xx — rejects HTML error pages
+      # -L  = follow redirects
+      # -s  = silent progress meter (errors still shown without -S)
+      # Minimum valid mmCIF file is ~50 KB; anything <10000 bytes is an error.
       # ------------------------------------------------------------------
       - name: Pre-download AlphaFold mmCIF fixtures
         run: |
           mkdir -p tests/fixtures/alphafold
           BASE="https://alphafold.ebi.ac.uk/files"
-          # List: UniProt IDs used in FULL_AUTOINHIBITED_DATA
           IDS="P12931 P42768 P16333 Q9BYF1 Q8IYH5 P07947 P00533 P00519 P15056 P04049 P17612 P19784 P45983 Q16539 P27361 Q05397 P36888 P07333 P10721 P04629 P06241"
+          N_OK=0
+          N_FAIL=0
           for ID in $IDS; do
             OUT="tests/fixtures/alphafold/AF_${ID}_v4.cif"
-            if [ ! -f "$OUT" ]; then
-              echo "Downloading AF-${ID}-F1-model_v4.cif ..."
-              curl --silent --max-time 60 --retry 3 --retry-delay 5 \
-                -o "$OUT" \
-                "${BASE}/AF-${ID}-F1-model_v4.cif" \
-                || (echo "v4 failed, trying v3..."; \
-                    curl --silent --max-time 60 --retry 2 \
-                    -o "$OUT" \
-                    "${BASE}/AF-${ID}-F1-model_v3.cif" \
-                    || echo "WARNING: could not download AF-${ID}")
-              # Remove empty files (404 responses)
-              [ -s "$OUT" ] || rm -f "$OUT"
+            if [ -f "$OUT" ] && [ "$(wc -c < "$OUT")" -gt 10000 ]; then
+              echo "  ${ID}: cached ($(wc -c < "$OUT") bytes)"
+              N_OK=$((N_OK+1))
+              continue
+            fi
+            DOWNLOADED=0
+            for VER in 4 3 2; do
+              URL="${BASE}/AF-${ID}-F1-model_v${VER}.cif"
+              TMP="${OUT}.tmp"
+              # -f: fail on HTTP error (no silent HTML 404 bodies)
+              # -L: follow redirects
+              if curl -fLs --max-time 60 --retry 3 --retry-delay 5 -o "$TMP" "$URL" 2>/dev/null; then
+                FSIZE=$(wc -c < "$TMP")
+                if [ "$FSIZE" -gt 10000 ]; then
+                  mv "$TMP" "$OUT"
+                  echo "  ${ID}: downloaded v${VER} (${FSIZE} bytes)"
+                  N_OK=$((N_OK+1))
+                  DOWNLOADED=1
+                  break
+                else
+                  echo "  ${ID} v${VER}: response too small (${FSIZE} bytes), skipping"
+                  rm -f "$TMP"
+                fi
+              else
+                echo "  ${ID} v${VER}: HTTP error"
+                rm -f "$TMP"
+              fi
+            done
+            if [ "$DOWNLOADED" -eq 0 ]; then
+              echo "  ${ID}: FAILED all versions"
+              N_FAIL=$((N_FAIL+1))
             fi
           done
-          echo "=== Downloaded fixtures ==="
-          ls -lh tests/fixtures/alphafold/ || echo "(none)"
+          echo "=== AF fixture summary: ${N_OK} OK, ${N_FAIL} failed ==="
+          ls -lh tests/fixtures/alphafold/
+          if [ "$N_OK" -lt 11 ]; then
+            echo "ERROR: fewer than 11 AF structures downloaded (got ${N_OK}). Check EBI connectivity."
+            exit 1
+          fi
 
       - name: Run QICESS full benchmark (22 proteins, real AF structures)
         run: python benchmarks/autoinhibited/run.py --full
 
       - name: Assert QICESS beats real AlphaFold on imfdRMSD
         run: |
-          python -c "
+          python - <<'PYEOF'
           import json
           with open('benchmarks/autoinhibited/results/stats.json') as f:
               m = json.load(f)
           assert m['real_af_comparison'] == True, 'Full mode must use real AF structures'
-          assert m['n_structures'] >= 18, f\"Only {m['n_structures']} structures processed (expected >=18)\"
+          assert m['n_structures'] >= 18, f"Only {m['n_structures']} structures processed (expected >=18)"
           qicess_frac = m['qicess_frac_below_3A']
           af3_frac = m['af3_frac_below_3A']
           p_value = m['wilcoxon_p_qicess_vs_af3']
-          assert qicess_frac > af3_frac, (
-              f'QICESS {qicess_frac:.2f} not better than AF {af3_frac:.2f}'
-          )
+          assert qicess_frac > af3_frac, f'QICESS {qicess_frac:.2f} not better than AF {af3_frac:.2f}'
           assert p_value < 0.05, f'Wilcoxon p={p_value:.4f} not significant'
-          print(f'PASS: QICESS {qicess_frac:.0%} vs AF {af3_frac:.0%}, p={p_value:.4f} ({m[\"n_structures\"]} structures)')
-          "
+          print(f"PASS: QICESS {qicess_frac:.0%} vs AF {af3_frac:.0%}, p={p_value:.4f} ({m['n_structures']} structures)")
+          PYEOF
       - name: Upload results
         uses: actions/upload-artifact@v4
         with:
