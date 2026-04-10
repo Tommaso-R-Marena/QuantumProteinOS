@@ -13,20 +13,25 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: Install
-        run: pip install -e .
+      - name: Cache ESM model weights
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/torch/hub
+          key: esm2-t6-8M-UR50D-weights
+      - name: Install dependencies
+        run: pip install -e ".[ml,dev]"
       - name: Run DisorderNet benchmark (CPU, v6)
         run: python benchmarks/disorder/run.py --fast
         # --fast flag uses a 500-sequence DisProt subset, not full dataset
         # Full dataset (~10k sequences) is too slow for CI
-      - name: Assert AUC >= 0.70
+      - name: Assert AUC >= 0.82
         run: |
           python -c "
           import json
           with open('benchmarks/disorder/results/metrics.json') as f:
               m = json.load(f)
           auc = m['auc_roc']
-          assert auc >= 0.70, f'DisorderNet AUC {auc:.3f} below threshold 0.70'
+          assert auc >= 0.82, f'DisorderNet AUC {auc:.3f} below threshold 0.82'
           print(f'PASS: DisorderNet AUC = {auc:.3f}')
           "
       - name: Upload disorder results
