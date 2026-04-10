@@ -2,6 +2,7 @@ import os
 import json
 import numpy as np
 import logging
+import shutil
 
 from qpos.disorder import DisorderNetV6
 from qpos.conformational import ConformationalSampler, QICESSScorer
@@ -27,19 +28,32 @@ class PipelineResult:
         os.makedirs(ensemble_dir, exist_ok=True)
         
         # 1. structure.pdb
-        struct_path = os.path.join(output_dir, "structure.pdb")
-        with open(struct_path, "w") as f:
-            f.write(f"REMARK 999 Final output structure: {self.structure}\n")
+        struct_out_path = os.path.join(output_dir, "structure.pdb")
+        if isinstance(self.structure, str) and os.path.exists(self.structure):
+            shutil.copy(self.structure, struct_out_path)
+        else:
+            # If structure is an object or missing, write a placeholder
+            from Bio.PDB import PDBIO
+            try:
+                io = PDBIO()
+                io.set_structure(self.structure)
+                io.save(struct_out_path)
+            except Exception:
+                with open(struct_out_path, "w") as f:
+                    f.write(f"REMARK 999 Final output structure: {self.structure}\n")
             
         # 2. disorder_scores.csv
-        if self.disorder_scores is not None:
-            pd.DataFrame({
-                'residue': range(len(self.disorder_scores)),
-                'disorder_probability': self.disorder_scores,
-                'is_disordered': (self.disorder_scores > 0.5).astype(int)
-            }).to_csv(os.path.join(output_dir, 'disorder_scores.csv'), index=False)
-        else:
-            open(os.path.join(output_dir, 'disorder_scores.csv'), 'w').close()
+        # If None or fallback, ensure we write something
+        disp_scores = self.disorder_scores
+        if disp_scores is None:
+            # Very fallback
+            disp_scores = np.array([0.5])
+            
+        pd.DataFrame({
+            'residue': range(len(disp_scores)),
+            'disorder_probability': disp_scores,
+            'is_disordered': (disp_scores > 0.5).astype(int)
+        }).to_csv(os.path.join(output_dir, 'disorder_scores.csv'), index=False)
             
         # 3. chirality_report.json
         with open(os.path.join(output_dir, 'chirality_report.json'), 'w') as f:
@@ -51,15 +65,18 @@ class PipelineResult:
         
         # 5. summary.txt
         with open(os.path.join(output_dir, 'summary.txt'), 'w') as f:
-            f.write(self._generate_summary(struct_path))
+            f.write(self._generate_summary(struct_out_path))
             
         # Ensemble components
         if self.ensemble:
             for i, conf_info in enumerate(self.ensemble):
                 conf = conf_info['structure'] if isinstance(conf_info, dict) else conf_info
                 conf_path = os.path.join(ensemble_dir, f"conf_{i+1:03d}.pdb")
-                with open(conf_path, "w") as f:
-                    f.write(f"REMARK 999 Ensemble conf: {conf}\n")
+                if isinstance(conf, str) and os.path.exists(conf):
+                    shutil.copy(conf, conf_path)
+                else:
+                    with open(conf_path, "w") as f:
+                        f.write(f"REMARK 999 Ensemble conf: {conf}\n")
 
     def _generate_summary(self, struct_path):
         summary = "QuantumProteinOS Execution Summary\n"
@@ -67,6 +84,10 @@ class PipelineResult:
         summary += f"Final structure: {struct_path}\n"
         summary += f"Ensemble size: {len(self.ensemble) if self.ensemble else 0}\n"
         summary += "Results output successfully.\n"
+        if not self.disorder_scores is not None:
+            summary += "[WARNING] Disorder prediction failed, using fallbacks.\n"
+        if not self.chirality_report:
+            summary += "[WARNING] Chirality audit failed or returned empty.\n"
         return summary
 
 
@@ -88,12 +109,13 @@ class QuantumProteinOS:
         import yaml
         with open(config_path, 'r') as f:
             config = yaml.safe_load(f)
-        return cls(config)
+        return cls(config or {})
 
     def run(self, sequence: str, pdb_path: str = None) -> PipelineResult:
         logger.info("Executing QuantumProteinOS Core Pipeline")
 
         # Step 1: Disorder
+        disorder_scores = None
         try:
             disorder_scores = self.disorder_model.predict(sequence)
         except Exception as e:
@@ -103,6 +125,7 @@ class QuantumProteinOS:
         ordered_mask = disorder_scores < 0.5
 
         # Step 2: Conformational ensemble
+        ensemble = []
         try:
             ensemble = self.ensemble_generator.generate(
                 pdb_path, n_modes=10, amplitude_scales=[2.0, 6.0],
@@ -113,6 +136,7 @@ class QuantumProteinOS:
             ensemble = [pdb_path] if pdb_path else []
 
         # Step 3: QICESS ensemble scoring
+        ranked = []
         try:
             scored = self.qicess.score_ensemble(ensemble)
             ranked = self.qicess.rank_ensemble(scored)
@@ -121,6 +145,7 @@ class QuantumProteinOS:
             ranked = [{'structure': s, 'score': 0.0} for s in ensemble]
 
         # Step 4: Rotamer packing
+        packed = pdb_path
         try:
             packed = self.rotamer_packer.pack_structure(
                 ranked, ordered_mask=ordered_mask,
@@ -133,7 +158,17 @@ class QuantumProteinOS:
         # Step 5: Chirality audit + correction
         report = {}
         try:
-            report = self.chirality_auditor.audit(packed)
+            # We need to parse structure if packed is a path for auditor
+            audit_subject = packed
+            if isinstance(packed, str):
+                if os.path.exists(packed):
+                    from qpos.data.pdb_parser import PDBParser
+                    audit_subject = PDBParser(packed).structure
+                else:
+                    # If it's a string but not a path, auditor can't process it
+                    raise ValueError(f"Cannot audit non-existent structural path: {packed}")
+            
+            report = self.chirality_auditor.audit(audit_subject)
             if report.get('chirality', {}).get('pct_correct', 100.0) < 100.0:
                 packed = self.af3_corrector.correct(packed)
         except Exception as e:

@@ -1,0 +1,5 @@
+QuantumProteinOS Execution Summary
+==================================
+Final structure: results/ci_smoke_test/structure.pdb
+Ensemble size: 40
+Results output successfully.

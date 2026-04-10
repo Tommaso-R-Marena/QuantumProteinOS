@@ -1,0 +1,12 @@
+{
+  "qubit_count": 3,
+  "locality": 3,
+  "connectivity": 3,
+  "noise_tolerance": 3,
+  "available_encodings": 3,
+  "classical_hardness": 3,
+  "problem_size_scaling": 3,
+  "biological_relevance": 3,
+  "data_availability": 3,
+  "idp_sampler_mode": 3
+}
