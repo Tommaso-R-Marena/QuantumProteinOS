@@ -9,7 +9,7 @@ class PDBFetcher:
     def __init__(self, pdb_dir: str = "data/pdb"):
         self.pdb_dir = pdb_dir
         os.makedirs(self.pdb_dir, exist_ok=True)
-        self.pdbl = PDBList(pdb=self.pdb_dir, obsolete_dir=os.path.join(self.pdb_dir, "obsolete"))
+        self.pdbl = PDBList(pdb=self.pdb_dir)
         
     def fetch_pdb(self, pdb_id: str) -> str:
         """Fetch a coordinate file from PDB and return the local path."""

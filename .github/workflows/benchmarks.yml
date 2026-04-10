@@ -51,7 +51,7 @@ jobs:
           python -c "
           import os, requests
           os.makedirs('tests/fixtures', exist_ok=True)
-          for pdb_id in ['1UBQ', '1L2Y']:
+          for pdb_id in ['1UBQ', '1L2Y', '2OZO', '1Y57', '2J0T', '1RD6', '3KMM']:
               url = f'https://files.rcsb.org/download/{pdb_id}.pdb'
               r = requests.get(url)
               with open(f'tests/fixtures/{pdb_id}.pdb', 'w') as f:
@@ -128,7 +128,7 @@ jobs:
           python -c "
           import os, requests
           os.makedirs('tests/fixtures', exist_ok=True)
-          for pdb_id in ['1UBQ', '1L2Y']:
+          for pdb_id in ['2OZO', '1Y57', '2J0T', '1RD6', '3KMM']:
               url = f'https://files.rcsb.org/download/{pdb_id}.pdb'
               r = requests.get(url)
               with open(f'tests/fixtures/{pdb_id}.pdb', 'w') as f:
@@ -175,7 +175,7 @@ jobs:
           python -c "
           import os, requests
           os.makedirs('tests/fixtures', exist_ok=True)
-          for pdb_id in ['1UBQ', '1L2Y']:
+          for pdb_id in ['1UBQ', '1L2Y', '2OZO', '1Y57', '2J0T', '1RD6', '3KMM']:
               url = f'https://files.rcsb.org/download/{pdb_id}.pdb'
               r = requests.get(url)
               with open(f'tests/fixtures/{pdb_id}.pdb', 'w') as f:
