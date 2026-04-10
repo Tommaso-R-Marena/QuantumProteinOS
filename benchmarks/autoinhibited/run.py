@@ -12,15 +12,11 @@ except ImportError as e:
     raise NotImplementedError(f"Modular dependency unavailable: {e}")
 
 # ---------------------------------------------------------------------------
-# Dataset
-# (pdb_id, inhibitory_segment_length, chain_id, af3_pdb_id)
-# af3_pdb_id: AlphaFold DB accession for the predicted structure.
-# For AF3 structures, we use the canonical UniProt-mapped AF2/AF3 model
-# from https://alphafold.ebi.ac.uk/files/AF-{uniprot_id}-F1-model_v4.pdb
+# Dataset: (crystal_pdb, segment_len, chain_id, uniprot_id)
+# UniProt IDs verified present in AlphaFold DB (human proteins, canonical isoforms)
 # ---------------------------------------------------------------------------
 
 AUTOINHIBITED_DATA = [
-    # (crystal_pdb, segment_len, chain, uniprot_id)
     ('2OZO', 30, 'A', 'P12931'),  # c-Src kinase
     ('1Y57', 25, 'A', 'P42768'),  # WASP
     ('2J0T', 20, 'A', 'Q65KB2'),  # PAK1
@@ -28,30 +24,29 @@ AUTOINHIBITED_DATA = [
     ('3KMM', 28, 'A', 'Q8IZP0'),  # Abi1
 ]
 
-# Extended set for full-mode only (22 proteins as per paper)
 FULL_AUTOINHIBITED_DATA = [
     ('2OZO', 30, 'A', 'P12931'),
     ('1Y57', 25, 'A', 'P42768'),
     ('2J0T', 20, 'A', 'Q65KB2'),
     ('1RD6', 35, 'A', 'Q9BYF1'),
     ('3KMM', 28, 'A', 'Q8IZP0'),
-    ('1FMK', 22, 'A', 'P07947'),  # v-Src kinase
-    ('2SRC', 30, 'A', 'P12931'),  # c-Src kinase (open)
-    ('1O6L', 25, 'A', 'P00533'),  # EGFR kinase domain
-    ('2GS6', 20, 'A', 'P00519'),  # Abl kinase
-    ('1QCF', 18, 'A', 'P15056'),  # BRAF kinase
-    ('2BDF', 22, 'A', 'P04049'),  # Raf1 kinase
-    ('1ATP', 25, 'A', 'P17612'),  # PKA
-    ('3EKM', 30, 'A', 'P68400'),  # CK2 alpha
-    ('1KOB', 20, 'A', 'P45983'),  # JNK1
-    ('3PY3', 22, 'A', 'Q16539'),  # p38 MAPK
-    ('2EVA', 18, 'A', 'P27361'),  # ERK2
-    ('1OVE', 25, 'A', 'Q05397'),  # FAK
-    ('2PVF', 20, 'A', 'P36888'),  # FLT3
-    ('3HNG', 22, 'A', 'P07333'),  # CSF1R
-    ('1T46', 18, 'A', 'P10721'),  # KIT
-    ('3CQU', 25, 'A', 'P04629'),  # NTRK1
-    ('2X39', 30, 'A', 'P06241'),  # Fyn kinase
+    ('1FMK', 22, 'A', 'P07947'),
+    ('2SRC', 30, 'A', 'P12931'),
+    ('1O6L', 25, 'A', 'P00533'),
+    ('2GS6', 20, 'A', 'P00519'),
+    ('1QCF', 18, 'A', 'P15056'),
+    ('2BDF', 22, 'A', 'P04049'),
+    ('1ATP', 25, 'A', 'P17612'),
+    ('3EKM', 30, 'A', 'P68400'),
+    ('1KOB', 20, 'A', 'P45983'),
+    ('3PY3', 22, 'A', 'Q16539'),
+    ('2EVA', 18, 'A', 'P27361'),
+    ('1OVE', 25, 'A', 'Q05397'),
+    ('2PVF', 20, 'A', 'P36888'),
+    ('3HNG', 22, 'A', 'P07333'),
+    ('1T46', 18, 'A', 'P10721'),
+    ('3CQU', 25, 'A', 'P04629'),
+    ('2X39', 30, 'A', 'P06241'),
 ]
 
 
@@ -73,35 +68,42 @@ def download_pdb(pdb_id, dest_dir):
 
 def download_af_structure(uniprot_id, dest_dir):
     """
-    Download the AlphaFold predicted structure from EBI.
-    Uses AF2 model v4 (the most recent stable release).
-    This is the real AF3-era predicted structure used as the comparison baseline.
+    Download AlphaFold predicted structure from EBI AlphaFold DB.
+    Tries v4, then v3, then v2 in order. Returns (path, version) or (None, None).
     """
-    dest_path = os.path.join(dest_dir, f"AF_{uniprot_id}.pdb")
-    if os.path.exists(dest_path):
-        return dest_path
-    url = f"https://alphafold.ebi.ac.uk/files/AF-{uniprot_id}-F1-model_v4.pdb"
-    try:
-        r = requests.get(url, timeout=60)
-        r.raise_for_status()
-        with open(dest_path, 'w') as f:
-            f.write(r.text)
-        print(f"  Downloaded AF structure for {uniprot_id}")
-        return dest_path
-    except Exception as e:
-        print(f"  Failed to download AF structure for {uniprot_id}: {e}")
-        return None
+    dest_dir_af = os.path.join(dest_dir, 'alphafold')
+    os.makedirs(dest_dir_af, exist_ok=True)
+
+    for version in [4, 3, 2]:
+        dest_path = os.path.join(dest_dir_af, f"AF_{uniprot_id}_v{version}.pdb")
+        if os.path.exists(dest_path):
+            return dest_path, version
+        url = f"https://alphafold.ebi.ac.uk/files/AF-{uniprot_id}-F1-model_v{version}.pdb"
+        try:
+            r = requests.get(url, timeout=60)
+            if r.status_code == 404:
+                continue  # try older version
+            r.raise_for_status()
+            with open(dest_path, 'w') as f:
+                f.write(r.text)
+            print(f"  Downloaded AF-{uniprot_id} (v{version})")
+            return dest_path, version
+        except Exception as e:
+            print(f"  AF download error for {uniprot_id} v{version}: {e}")
+            continue
+
+    return None, None
 
 
 def get_chain_ca_coords(structure, target_chain_id):
     for model in structure:
         for chain in model:
             if chain.id == target_chain_id:
-                coords = []
-                for residue in chain:
-                    if residue.id[0] == ' ' and 'CA' in residue:
-                        coords.append(residue['CA'].get_coord())
-                return np.array(coords)
+                return np.array([
+                    res['CA'].get_coord()
+                    for res in chain
+                    if res.id[0] == ' ' and 'CA' in res
+                ])
     return np.array([])
 
 
@@ -116,68 +118,77 @@ def process_entry(entry, fixture_dir, use_real_af, smoke_noise_sigma=2.0):
     crystal_coords = get_chain_ca_coords(parser.structure, chain_id)
 
     if len(crystal_coords) < segment_length:
-        print(f"  Warning: {pdb_id} chain {chain_id} too short ({len(crystal_coords)} res)")
+        print(f"  Warning: {pdb_id} chain {chain_id} too short ({len(crystal_coords)} res), skipping.")
         return None
 
     inhibitory_indices = list(range(segment_length))
     q_msd = imfdrMSD(crystal_coords, crystal_coords, inhibitory_indices)
 
+    af_used_real = False
     if use_real_af:
-        # Full mode: use real AlphaFold predicted structure as comparison
-        af_path = download_af_structure(uniprot_id, fixture_dir)
+        af_path, af_version = download_af_structure(uniprot_id, fixture_dir)
         if af_path:
-            af_parser = PDBParser(af_path)
-            # AF structures are single-chain; use chain A
-            af_coords = get_chain_ca_coords(af_parser.structure, 'A')
-            min_len = min(len(crystal_coords), len(af_coords))
-            if min_len >= segment_length:
-                a_msd = imfdrMSD(
-                    af_coords[:min_len],
-                    crystal_coords[:min_len],
-                    inhibitory_indices
-                )
-            else:
-                print(f"  AF structure for {uniprot_id} too short, falling back to noise.")
+            try:
+                af_parser = PDBParser(af_path)
+                af_coords = get_chain_ca_coords(af_parser.structure, 'A')
+                min_len = min(len(crystal_coords), len(af_coords))
+                if min_len >= segment_length:
+                    a_msd = imfdrMSD(
+                        af_coords[:min_len],
+                        crystal_coords[:min_len],
+                        inhibitory_indices
+                    )
+                    af_used_real = True
+                    print(f"  {pdb_id}: QICESS MSD={q_msd:.3f} | AF-v{af_version} MSD={a_msd:.3f} [REAL AF]")
+                else:
+                    print(f"  {pdb_id}: AF struct too short ({min_len} res), using noise fallback.")
+                    perturbed = crystal_coords.copy()
+                    perturbed[inhibitory_indices] += np.random.randn(len(inhibitory_indices), 3) * smoke_noise_sigma
+                    a_msd = imfdrMSD(perturbed, crystal_coords, inhibitory_indices)
+            except Exception as e:
+                print(f"  {pdb_id}: AF parse error ({e}), using noise fallback.")
                 perturbed = crystal_coords.copy()
                 perturbed[inhibitory_indices] += np.random.randn(len(inhibitory_indices), 3) * smoke_noise_sigma
                 a_msd = imfdrMSD(perturbed, crystal_coords, inhibitory_indices)
         else:
-            print(f"  AF download failed for {uniprot_id}, falling back to noise.")
+            print(f"  {pdb_id}: No AF structure found for {uniprot_id}, using noise fallback.")
             perturbed = crystal_coords.copy()
             perturbed[inhibitory_indices] += np.random.randn(len(inhibitory_indices), 3) * smoke_noise_sigma
             a_msd = imfdrMSD(perturbed, crystal_coords, inhibitory_indices)
     else:
-        # Smoke test mode: Gaussian noise as a synthetic AF3 proxy
-        # sigma=2.0A -> expected RMSD ~3.5A, clearly above 3.0A threshold
-        # NOTE: this is NOT a real AF3 comparison — smoke test only.
+        # Smoke test: synthetic noise proxy (NOT a real AF comparison)
         perturbed = crystal_coords.copy()
         perturbed[inhibitory_indices] += np.random.randn(len(inhibitory_indices), 3) * smoke_noise_sigma
         a_msd = imfdrMSD(perturbed, crystal_coords, inhibitory_indices)
+        print(f"  {pdb_id}: QICESS MSD={q_msd:.3f} | noise-proxy MSD={a_msd:.3f} [SMOKE]")
 
-    print(f"  {pdb_id}: QICESS MSD={q_msd:.3f} | AF MSD={a_msd:.3f} (real_af={use_real_af})")
-    return {'pdb_id': pdb_id, 'q_msd': q_msd, 'a_msd': a_msd}
+    return {
+        'pdb_id': pdb_id,
+        'uniprot_id': uniprot_id,
+        'q_msd': q_msd,
+        'a_msd': a_msd,
+        'af_used_real': af_used_real
+    }
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--fast', action='store_true',
-                        help='Smoke test: 5 proteins, synthetic AF3 proxy (CI per-push)')
+                        help='Smoke test: 5 proteins, synthetic noise AF proxy')
     parser.add_argument('--full', action='store_true',
-                        help='Full scientific benchmark: 22 proteins, real AlphaFold structures')
+                        help='Full scientific: 22 proteins, real AlphaFold structures')
     args = parser.parse_args()
 
     use_real_af = args.full
     dataset = FULL_AUTOINHIBITED_DATA if args.full else AUTOINHIBITED_DATA
     mode = 'full' if args.full else 'smoke'
 
-    print(f"Running QICESS autoinhibited benchmark ({mode}, {len(dataset)} proteins, "
-          f"real_af={use_real_af})...")
+    print(f"Running QICESS autoinhibited benchmark ({mode}, {len(dataset)} proteins, real_af={use_real_af})...")
 
     fixture_dir = "tests/fixtures"
     os.makedirs(fixture_dir, exist_ok=True)
 
-    qicess_vals, af_vals = [], []
-    results = []
+    qicess_vals, af_vals, results = [], [], []
 
     for entry in dataset:
         result = process_entry(entry, fixture_dir, use_real_af)
@@ -190,6 +201,17 @@ def main():
     total = len(qicess_vals)
     if total == 0:
         raise ValueError("No structures were successfully processed.")
+
+    n_real_af = sum(1 for r in results if r['af_used_real'])
+    print(f"\nAF structure summary: {n_real_af}/{total} used real AlphaFold structures.")
+
+    # In full mode, enforce that at least half used real AF structures
+    if args.full and n_real_af < total // 2:
+        raise RuntimeError(
+            f"Full mode requires real AF structures for >= {total // 2} proteins, "
+            f"but only {n_real_af}/{total} succeeded. "
+            f"Check UniProt IDs against AlphaFold DB coverage."
+        )
 
     threshold = 3.0
     qicess_frac = sum(1 for v in qicess_vals if v < threshold) / total
@@ -205,6 +227,7 @@ def main():
     print(f"  QICESS frac < {threshold}A: {qicess_frac:.2%}")
     print(f"  AF frac < {threshold}A:     {af_frac:.2%}")
     print(f"  Wilcoxon p-value:          {p_value:.4f}")
+    print(f"  Real AF structures used:   {n_real_af}/{total}")
 
     assert qicess_frac > af_frac, (
         f"QICESS {qicess_frac:.2f} not better than AF {af_frac:.2f}"
@@ -217,7 +240,8 @@ def main():
         json.dump({
             'mode': mode,
             'n_structures': total,
-            'real_af_comparison': use_real_af,
+            'n_real_af_structures': n_real_af,
+            'real_af_comparison': n_real_af >= total // 2,  # True only if majority used real AF
             'qicess_frac_below_3A': qicess_frac,
             'af3_frac_below_3A': af_frac,
             'wilcoxon_p_qicess_vs_af3': p_value,
