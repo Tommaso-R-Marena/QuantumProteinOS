@@ -43,7 +43,21 @@ jobs:
         with:
           python-version: "3.11"
       - name: Install
-        run: pip install -e .
+        run: |
+          pip install -e .
+          pip install requests
+      - name: Download fixture PDB files
+        run: |
+          python -c "
+          import os, requests
+          os.makedirs('tests/fixtures', exist_ok=True)
+          for pdb_id in ['1UBQ', '1L2Y']:
+              url = f'https://files.rcsb.org/download/{pdb_id}.pdb'
+              r = requests.get(url)
+              with open(f'tests/fixtures/{pdb_id}.pdb', 'w') as f:
+                  f.write(r.text)
+          print('Fixtures downloaded.')
+          "
       - name: Run ChiralFold validation (31 PDB structures)
         run: python benchmarks/chirality/run.py
         # Uses fixture PDB files in tests/fixtures/ — no network calls
@@ -106,7 +120,21 @@ jobs:
         with:
           python-version: "3.11"
       - name: Install
-        run: pip install -e .
+        run: |
+          pip install -e .
+          pip install requests
+      - name: Download fixture PDB files
+        run: |
+          python -c "
+          import os, requests
+          os.makedirs('tests/fixtures', exist_ok=True)
+          for pdb_id in ['1UBQ', '1L2Y']:
+              url = f'https://files.rcsb.org/download/{pdb_id}.pdb'
+              r = requests.get(url)
+              with open(f'tests/fixtures/{pdb_id}.pdb', 'w') as f:
+                  f.write(r.text)
+          print('Fixtures downloaded.')
+          "
       - name: Run QICESS 22-protein autoinhibited benchmark
         run: python benchmarks/autoinhibited/run.py
         # Uses calibrated simulations — no real AF3 inference needed
@@ -139,7 +167,21 @@ jobs:
         with:
           python-version: "3.11"
       - name: Install
-        run: pip install -e .
+        run: |
+          pip install -e .
+          pip install requests
+      - name: Download fixture PDB files
+        run: |
+          python -c "
+          import os, requests
+          os.makedirs('tests/fixtures', exist_ok=True)
+          for pdb_id in ['1UBQ', '1L2Y']:
+              url = f'https://files.rcsb.org/download/{pdb_id}.pdb'
+              r = requests.get(url)
+              with open(f'tests/fixtures/{pdb_id}.pdb', 'w') as f:
+                  f.write(r.text)
+          print('Fixtures downloaded.')
+          "
       - name: Run end-to-end pipeline (ubiquitin, fixture PDB)
         run: |
           python scripts/run_full_pipeline.py \

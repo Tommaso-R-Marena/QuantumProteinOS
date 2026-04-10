@@ -3,18 +3,31 @@ import json
 try:
     from qpos.chirality.auditor import ChiralFoldAuditor
     from qpos.data.pdb_parser import PDBParser
+    from qpos.data.pdb_fetcher import PDBFetcher
 except ImportError as e:
     raise NotImplementedError(f"Modular dependency unavailable: {e}")
 
+CHIRALITY_BENCHMARK_PDBS = [
+    '1UBQ', '1L2Y', '1CRN', '1BRS', '1BPI', '1VII', '1GB1', '2HHB',
+    '1MBN', '1TIM', '1HEW', '2LZM', '1AKE', '3LZT', '1TEN', '1IGD',
+    '1HRC', '1PHT', '2CI2', '1CSP', '1FKB', '1HEL', '1IGT', '2PTN',
+    '1RCB', '1SHF', '1STN', '1TOP', '2HVP', '1YCC', '4PTI'
+]
 
 def main():
     print("Running ChiralFold validation...")
     
     auditor = ChiralFoldAuditor()
     
-    # Target our local testing fixtures
+    # Download testing fixtures
     fixture_dir = "tests/fixtures"
-    fixture_files = [os.path.join(fixture_dir, f) for f in os.listdir(fixture_dir) if f.endswith('.pdb')]
+    os.makedirs(fixture_dir, exist_ok=True)
+    fetcher = PDBFetcher(output_dir=fixture_dir)
+    
+    for pdb_id in CHIRALITY_BENCHMARK_PDBS:
+        fetcher.fetch_pdb(pdb_id)
+        
+    fixture_files = [os.path.join(fixture_dir, f"{pdb_id}.pdb") for pdb_id in CHIRALITY_BENCHMARK_PDBS]
     
     correct_pcts = []
     perfect_structs = 0
