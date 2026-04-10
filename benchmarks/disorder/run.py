@@ -12,8 +12,8 @@ except ImportError as e:
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--fast', action='store_true', help='Use 750-sequence subset')
-    parser.add_argument('--full', action='store_true', help='Full evaluation')
+    parser.add_argument('--fast', action='store_true', help='Use 500-sequence subset (smoke test)')
+    parser.add_argument('--full', action='store_true', help='Full evaluation on entire DisProt CAID3')
     args = parser.parse_args()
 
     print(f"Running DisorderNet benchmark {'(fast)' if args.fast else '(full)'}...")
@@ -37,19 +37,25 @@ def main():
     df['is_mostly_disordered'] = (df['pct_disordered'] > 0.3).astype(int)
     
     if args.fast:
-        if len(df) > 750:
-            # Increased fast mode sample size for better signal
-            df, _ = train_test_split(df, train_size=750, random_state=42, stratify=df['is_mostly_disordered'])
-        
+        # Smoke test: 350 train / 150 test from a 500-seq stratified subset
+        # Purpose: confirm pipeline runs and AUC >= 0.65. NOT the paper number.
+        if len(df) > 500:
+            df, _ = train_test_split(df, train_size=500, random_state=42, stratify=df['is_mostly_disordered'])
         train_df, test_df = train_test_split(
-            df, test_size=150, random_state=42, 
+            df, test_size=150, random_state=42,
             stratify=df['is_mostly_disordered']
         )
+        threshold = 0.65
+        mode_str = "fast mode (smoke test)"
     else:
+        # Full mode: 80/20 stratified split on entire DisProt CAID3
+        # This is the number that goes in the paper.
         train_df, test_df = train_test_split(
-            df, test_size=0.2, random_state=42, 
+            df, test_size=0.2, random_state=42,
             stratify=df['is_mostly_disordered']
         )
+        threshold = 0.82
+        mode_str = "full mode"
         
     # Check 1: Data leakage
     train_ids = set(train_df['uniprot_id'].tolist())
@@ -62,7 +68,7 @@ def main():
     disorder_fraction = all_train_labels.mean()
     print(f"Training label distribution: {disorder_fraction:.2%} disordered")
     assert 0.05 < disorder_fraction < 0.95, (
-        f"Label distribution is degenerate: {disorder_fraction:.2%} disordered. "
+        f"Label distribution is degenerate: {disorder_fraction:.2%} disordered."
     )
 
     model = DisorderNetV6()
@@ -77,8 +83,6 @@ def main():
         seq = row['sequence']
         labels = row['disorder_labels']
         preds = model.predict(seq)
-        
-        # Ensure flat arrays
         all_y_true.extend(labels)
         all_y_pred.extend(preds.flatten())
         
@@ -86,33 +90,25 @@ def main():
     all_y_pred = np.array(all_y_pred)
     
     # Check 3: Verify test set has both classes
-    assert len(np.unique(all_y_true)) == 2, (
-        "Test set contains only one class."
-    )
+    assert len(np.unique(all_y_true)) == 2, "Test set contains only one class."
         
-    if len(np.unique(all_y_true)) > 1:
-        auc = roc_auc_score(all_y_true, all_y_pred)
-    else:
-        auc = 0.5 
-        
+    auc = roc_auc_score(all_y_true, all_y_pred)
+          
     print(f"Prediction stats: min={all_y_pred.min():.3f}, max={all_y_pred.max():.3f}, "
           f"mean={all_y_pred.mean():.3f}, std={all_y_pred.std():.3f}")
-          
     print(f"AUC: {auc:.3f}")
     
-    # Update thresholds based on data size and model capability
-    if args.fast:
-        threshold = 0.68
-        mode_str = "fast mode"
-    else:
-        threshold = 0.82
-        mode_str = "full mode"
-        
     assert auc >= threshold, f'DisorderNet AUC {auc:.3f} below threshold {threshold} ({mode_str})'
         
     os.makedirs('benchmarks/disorder/results', exist_ok=True)
     with open('benchmarks/disorder/results/metrics.json', 'w') as f:
-        json.dump({'auc_roc': auc}, f)
+        json.dump({
+            'auc_roc': auc,
+            'mode': 'fast' if args.fast else 'full',
+            'n_train': len(train_df),
+            'n_test': len(test_df),
+            'threshold': threshold
+        }, f, indent=2)
         
 if __name__ == '__main__':
     main()

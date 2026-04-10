@@ -1,0 +1,50 @@
+name: Full Disorder Benchmark (Monthly)
+
+on:
+  schedule:
+    - cron: '0 4 1 * *'  # 4 AM UTC on the 1st of every month
+  workflow_dispatch:     # Manual trigger from GitHub UI
+
+jobs:
+  disorder-full:
+    runs-on: ubuntu-latest
+    timeout-minutes: 340  # ~5.5 hours, under 6-hour hard limit
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Cache ESM model weights
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/torch/hub
+          key: esm2-t6-8M-UR50D-weights
+
+      - name: Install dependencies
+        run: pip install -e ".[ml,dev]"
+
+      - name: Run DisorderNet benchmark (full dataset)
+        run: python benchmarks/disorder/run.py --full
+        # Full mode: 80/20 stratified split on entire DisProt CAID3 dataset
+        # Expected runtime: 30-90 min on 2-core CPU depending on dataset size
+        # This is the number that goes in the paper.
+
+      - name: Assert AUC >= 0.82 (full mode)
+        run: |
+          python -c "
+          import json
+          with open('benchmarks/disorder/results/metrics.json') as f:
+              m = json.load(f)
+          auc = m['auc_roc']
+          assert auc >= 0.82, f'DisorderNet full-mode AUC {auc:.3f} below threshold 0.82'
+          print(f'PASS: DisorderNet full-mode AUC = {auc:.3f}')
+          "
+
+      - name: Upload full benchmark results
+        uses: actions/upload-artifact@v4
+        with:
+          name: disorder-full-benchmark-${{ github.run_id }}
+          path: benchmarks/disorder/results/
+          retention-days: 90

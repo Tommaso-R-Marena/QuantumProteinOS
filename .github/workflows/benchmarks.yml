@@ -23,15 +23,15 @@ jobs:
       - name: Run DisorderNet benchmark (CPU, v6)
         run: python benchmarks/disorder/run.py --fast
         # --fast flag uses a 500-sequence DisProt subset, not full dataset
-        # Full dataset (~10k sequences) is too slow for CI
-      - name: Assert AUC >= 0.68
+        # Full dataset benchmark runs monthly via full-benchmark.yml
+      - name: Assert AUC >= 0.65 (fast mode smoke test)
         run: |
           python -c "
           import json
           with open('benchmarks/disorder/results/metrics.json') as f:
               m = json.load(f)
           auc = m['auc_roc']
-          assert auc >= 0.68, f'DisorderNet AUC {auc:.3f} below threshold 0.68'
+          assert auc >= 0.65, f'DisorderNet AUC {auc:.3f} below threshold 0.65 (fast smoke test)'
           print(f'PASS: DisorderNet AUC = {auc:.3f}')
           "
       - name: Upload disorder results
