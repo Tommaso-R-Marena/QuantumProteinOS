@@ -1,9 +1,11 @@
 try:
     import torch
     import esm
+    import numpy as np
     HAS_ML = True
 except ImportError:
     HAS_ML = False
+    import numpy as np
 
 class ESMCPUFeatureExtractor:
     """Uses fair-esm 8M CPU model to extract baseline representations."""
@@ -15,16 +17,22 @@ class ESMCPUFeatureExtractor:
         else:
             self.model = None
 
-    def get_embeddings(self, sequence: str):
+    def get_embeddings(self, sequence: str) -> np.ndarray:
         if not HAS_ML:
             raise ImportError(
                 "ESM-2 embeddings require the ML extras. "
                 "Install with: pip install 'qpos[ml]'"
             )
         data = [("protein", sequence)]
-        _, _, batch_tokens = self.batch_converter(data)
+        batch_labels, batch_strs, batch_tokens = self.batch_converter(data)
         with torch.no_grad():
             results = self.model(batch_tokens, repr_layers=[6], return_contacts=False)
-        token_representations = results["representations"][6]
-        # Return only sequence tokens (remove start/end)
-        return token_representations[0, 1 : len(sequence) + 1]
+        
+        # Strip <cls> token (index 0) and <eos> token (index -1)
+        # result shape: (1, seq_len+2, 320) -> (seq_len, 320)
+        embeddings = results["representations"][6][0, 1:-1, :].cpu().numpy()
+        
+        assert embeddings.shape == (len(sequence), 320), \
+            f"ESM shape mismatch: got {embeddings.shape}, expected ({len(sequence)}, 320)"
+            
+        return embeddings

@@ -12,7 +12,7 @@ except ImportError as e:
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--fast', action='store_true', help='Use 500-sequence subset')
+    parser.add_argument('--fast', action='store_true', help='Use 750-sequence subset')
     parser.add_argument('--full', action='store_true', help='Full evaluation')
     args = parser.parse_args()
 
@@ -32,17 +32,17 @@ def main():
         
     df['disorder_labels'] = df['disorder_labels'].apply(parse_labels)
     
-    # Check 4: Stratified splitting
+    # Stratified splitting
     df['pct_disordered'] = df['disorder_labels'].apply(lambda x: np.mean(x) if len(x)>0 else 0)
     df['is_mostly_disordered'] = (df['pct_disordered'] > 0.3).astype(int)
     
     if args.fast:
-        if len(df) > 500:
-            # Sample preserving stratification
-            df, _ = train_test_split(df, train_size=500, random_state=42, stratify=df['is_mostly_disordered'])
+        if len(df) > 750:
+            # Increased fast mode sample size for better signal
+            df, _ = train_test_split(df, train_size=750, random_state=42, stratify=df['is_mostly_disordered'])
         
         train_df, test_df = train_test_split(
-            df, test_size=100, random_state=42, 
+            df, test_size=150, random_state=42, 
             stratify=df['is_mostly_disordered']
         )
     else:
@@ -63,7 +63,6 @@ def main():
     print(f"Training label distribution: {disorder_fraction:.2%} disordered")
     assert 0.05 < disorder_fraction < 0.95, (
         f"Label distribution is degenerate: {disorder_fraction:.2%} disordered. "
-        "Check DisProt downloader — may be returning all-0 or all-1 labels."
     )
 
     model = DisorderNetV6()
@@ -88,8 +87,7 @@ def main():
     
     # Check 3: Verify test set has both classes
     assert len(np.unique(all_y_true)) == 2, (
-        "Test set contains only one class — AUC is undefined/trivial. "
-        "Ensure stratified sampling preserves both ordered and disordered residues."
+        "Test set contains only one class."
     )
         
     if len(np.unique(all_y_true)) > 1:
@@ -97,12 +95,20 @@ def main():
     else:
         auc = 0.5 
         
-    # Check 5: Print actual predictions confirmation
     print(f"Prediction stats: min={all_y_pred.min():.3f}, max={all_y_pred.max():.3f}, "
           f"mean={all_y_pred.mean():.3f}, std={all_y_pred.std():.3f}")
           
     print(f"AUC: {auc:.3f}")
-    assert auc >= 0.70, f'DisorderNet AUC {auc:.3f} below threshold 0.70 (fast mode)'
+    
+    # Update thresholds based on data size and model capability
+    if args.fast:
+        threshold = 0.72
+        mode_str = "fast mode"
+    else:
+        threshold = 0.82
+        mode_str = "full mode"
+        
+    assert auc >= threshold, f'DisorderNet AUC {auc:.3f} below threshold {threshold} ({mode_str})'
         
     os.makedirs('benchmarks/disorder/results', exist_ok=True)
     with open('benchmarks/disorder/results/metrics.json', 'w') as f:

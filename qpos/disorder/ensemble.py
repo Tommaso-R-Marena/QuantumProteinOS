@@ -35,6 +35,7 @@ class DisorderNetV6:
             for seq in sequences:
                 try:
                     emb = self.feature_extractor.esm.get_embeddings(seq)
+                    # get_embeddings now returns numpy, but defensive check
                     if hasattr(emb, 'cpu'):
                         emb = emb.cpu().numpy()
                     all_embeddings.append(emb)
@@ -52,6 +53,11 @@ class DisorderNetV6:
         X_list = [self.feature_extractor.extract_features(seq) for seq in sequences]
         X = np.vstack(X_list)
         y = np.concatenate(labels)
+        
+        # Issue 3: Diagnostic prints for feature variance
+        esm_cols = X[:, 38*7:]  # columns 266-405 are ESM features
+        print(f"ESM feature variance: {esm_cols.var(axis=0).mean():.6f} (should be > 0.001)")
+        print(f"Physicochemical feature variance: {X[:, :266].var(axis=0).mean():.6f}")
         
         # 3. Fit classifiers
         self.feature_names_ = [f'feature_{i}' for i in range(X.shape[1])]
