@@ -1,7 +1,11 @@
 import os
 import json
-from qpos.chirality.auditor import ChiralFoldAuditor
-from qpos.data.pdb_parser import PDBParser
+try:
+    from qpos.chirality.auditor import ChiralFoldAuditor
+    from qpos.data.pdb_parser import PDBParser
+except ImportError as e:
+    raise NotImplementedError(f"Modular dependency unavailable: {e}")
+
 
 def main():
     print("Running ChiralFold validation...")

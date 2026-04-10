@@ -12,13 +12,13 @@ authors = [
     {name = "Tommaso R. Marena", email = "marena@cua.edu"}
 ]
 dependencies = [
+    # Core — always installed, fast
     "pennylane>=0.38",
     "biopython>=1.83",
     "numpy>=1.26",
     "scipy>=1.12",
     "matplotlib>=3.8",
     "seaborn>=0.13",
-    "torch>=2.2",
     "pandas>=2.2",
     "networkx>=3.2",
     "scikit-learn>=1.4",
@@ -26,11 +26,40 @@ dependencies = [
     "xgboost>=2.0",
     "requests>=2.31",
     "tqdm>=4.66",
+    "pyyaml>=6.0",
 ]
 
 [project.optional-dependencies]
-boltz = ["boltz>=0.4.0", "pytorch-lightning>=2.2.0"]
-dev = ["pytest>=8.0", "pytest-cov>=4.0", "pytest-mock>=3.0"]
+# pip install "qpos[quantum]"
+quantum = [
+    "pennylane-lightning>=0.38",
+    "qiskit-aer>=0.13",
+]
+# pip install "qpos[ml]"
+ml = [
+    "torch>=2.2",
+    "transformers>=4.38.0",
+    "fair-esm>=2.0.0",
+    "peft>=0.10.0",
+]
+# pip install "qpos[boltz]"
+boltz = [
+    "boltz>=0.4.0",
+    "pytorch-lightning>=2.2.0",
+]
+# pip install "qpos[dev]"
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=4.0",
+    "pytest-mock>=3.0",
+]
+# pip install "qpos[all]" — full install for local development
+all = [
+    "qpos[quantum]",
+    "qpos[ml]",
+    "qpos[boltz]",
+    "qpos[dev]",
+]
 
 [tool.setuptools.packages.find]
 where = ["."]

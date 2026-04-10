@@ -1,6 +1,11 @@
 import numpy as np
 from Bio.PDB import PDBParser as BioPDBParser
-from Bio.PDB.Polypeptide import three_to_one
+try:
+    from Bio.PDB.Polypeptide import three_to_one
+except ImportError:
+    from Bio.Data.IUPACData import protein_letters_3to1
+    def three_to_one(resname):
+        return protein_letters_3to1[resname.capitalize()]
 
 class PDBParser:
     """Parses PDB files into coordinate arrays and sequence information for framework use."""

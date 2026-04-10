@@ -3,7 +3,12 @@ import os
 import json
 import numpy as np
 from sklearn.metrics import roc_auc_score
-from qpos.disorder import DisorderNetV6, download_disprot
+try:
+    from qpos.disorder.ensemble import DisorderNetV6
+    from qpos.disorder.disprot_loader import download_disprot
+except ImportError as e:
+    raise NotImplementedError(f"Modular dependency unavailable: {e}")
+
 
 def main():
     parser = argparse.ArgumentParser()
