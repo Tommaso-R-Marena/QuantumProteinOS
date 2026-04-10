@@ -2,6 +2,7 @@ import numpy as np
 import warnings
 import pandas as pd
 from sklearn.decomposition import PCA
+from sklearn.preprocessing import StandardScaler
 from qpos.disorder.features import DisorderFeatureExtractor
 
 class DisorderNetV6:
@@ -9,6 +10,7 @@ class DisorderNetV6:
         self.config = config or {}
         self.use_esm = self.config.get('use_esm', True)
         self.feature_extractor = DisorderFeatureExtractor(use_esm=self.use_esm)
+        self.scaler = StandardScaler()
         
         try:
             from lightgbm import LGBMClassifier
@@ -35,7 +37,6 @@ class DisorderNetV6:
             for seq in sequences:
                 try:
                     emb = self.feature_extractor.esm.get_embeddings(seq)
-                    # get_embeddings now returns numpy, but defensive check
                     if hasattr(emb, 'cpu'):
                         emb = emb.cpu().numpy()
                     all_embeddings.append(emb)
@@ -54,15 +55,22 @@ class DisorderNetV6:
         X = np.vstack(X_list)
         y = np.concatenate(labels)
         
-        # Issue 3: Diagnostic prints for feature variance
-        esm_cols = X[:, 38*7:]  # columns 266-405 are ESM features
-        print(f"ESM feature variance: {esm_cols.var(axis=0).mean():.6f} (should be > 0.001)")
-        print(f"Physicochemical feature variance: {X[:, :266].var(axis=0).mean():.6f}")
+        # Diagnostic prints for raw feature variance
+        esm_cols_idx = 38 * 7
+        print(f"Raw ESM feature variance: {X[:, esm_cols_idx:].var(axis=0).mean():.6f} (should be > 0.001)")
+        print(f"Raw Physicochemical feature variance: {X[:, :esm_cols_idx].var(axis=0).mean():.6f}")
         
-        # 3. Fit classifiers
+        # 3. Scale features
+        print("Normalizing features with StandardScaler...")
         self.feature_names_ = [f'feature_{i}' for i in range(X.shape[1])]
-        X_df = pd.DataFrame(X, columns=self.feature_names_)
+        X_scaled = self.scaler.fit_transform(X)
+        X_df = pd.DataFrame(X_scaled, columns=self.feature_names_)
         
+        # Post-scaling diagnostics
+        print(f"Post-scaling ESM variance: {X_scaled[:, esm_cols_idx:].var(axis=0).mean():.6f} (should equal ~1.0)")
+        print(f"Post-scaling physicochemical variance: {X_scaled[:, :esm_cols_idx].var(axis=0).mean():.6f} (should equal ~1.0)")
+        
+        # 4. Fit classifiers
         print("Training LightGBM and XGBoost ensemble...")
         self.lgbm.fit(X_df, y)
         self.xgb.fit(X_df, y)
@@ -76,7 +84,9 @@ class DisorderNetV6:
             return self._heuristic_predict(sequence)
             
         X = self.feature_extractor.extract_features(sequence)
-        X_df = pd.DataFrame(X, columns=self.feature_names_)
+        # Apply scaling using the fitted scaler
+        X_scaled = self.scaler.transform(X)
+        X_df = pd.DataFrame(X_scaled, columns=self.feature_names_)
         
         p_lgbm = self.lgbm.predict_proba(X_df)[:, 1]
         p_xgb = self.xgb.predict_proba(X_df)[:, 1]
@@ -84,7 +94,6 @@ class DisorderNetV6:
         
     def _heuristic_predict(self, sequence: str) -> np.ndarray:
         """Fallback heuristic based on amino acid propensities."""
-        # Top disorder/order promoters (Uversky/Dunker)
         promoters_disorder = {'R', 'K', 'E', 'S', 'P', 'Q', 'A', 'G'}
         promoters_order = {'W', 'Y', 'F', 'I', 'L', 'V', 'C', 'N'}
         scores = []
@@ -96,7 +105,6 @@ class DisorderNetV6:
             else:
                 scores.append(0.45)
         
-        # Sliding average window 11
         w = 11
         half = w // 2
         padded = np.pad(scores, (half, half), mode='edge')

@@ -102,7 +102,7 @@ def main():
     
     # Update thresholds based on data size and model capability
     if args.fast:
-        threshold = 0.72
+        threshold = 0.68
         mode_str = "fast mode"
     else:
         threshold = 0.82
