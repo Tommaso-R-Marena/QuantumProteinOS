@@ -1,5 +1,6 @@
 """Data utilities for fetching and parsing structures and sequences."""
 
-from qpos.data import pdb_fetcher, pdb_parser, benchmark_datasets
+from qpos.data.pdb_fetcher import PDBFetcher
+from qpos.data.pdb_parser import PDBParser
 
-__all__ = ["pdb_fetcher", "pdb_parser", "benchmark_datasets"]
+__all__ = ["PDBFetcher", "PDBParser"]

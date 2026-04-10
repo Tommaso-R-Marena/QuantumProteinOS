@@ -6,6 +6,7 @@ SIMULATION_DISCLAIMER = (
 
 print(SIMULATION_DISCLAIMER)
 
-from qpos.quantum import iws_qaoa, ogp_router, qadf_rubric, qubo_builder, vqc, xy_mixer, zne
+from qpos.quantum.iws_qaoa import IWSQAOASolver
+from qpos.quantum.qadf_rubric import QADFRubric
 
-__all__ = ["iws_qaoa", "ogp_router", "qadf_rubric", "qubo_builder", "vqc", "xy_mixer", "zne"]
+__all__ = ["IWSQAOASolver", "QADFRubric"]

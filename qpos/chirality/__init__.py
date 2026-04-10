@@ -1,5 +1,6 @@
 """Chirality and Stereochemistry Auditing Module."""
 
-from qpos.chirality import af3_corrector, auditor, boltz_augmentation, mirror, validator
+from qpos.chirality.auditor import ChiralFoldAuditor
+from qpos.chirality.af3_corrector import AF3ChiralityCorrector
 
-__all__ = ["af3_corrector", "auditor", "boltz_augmentation", "mirror", "validator"]
+__all__ = ["ChiralFoldAuditor", "AF3ChiralityCorrector"]

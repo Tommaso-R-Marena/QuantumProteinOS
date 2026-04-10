@@ -1,5 +1,5 @@
 """Rotamer packing & sidechain modeling."""
 
-from qpos.rotamers import packer
+from qpos.rotamers.packer import RotamerPacker
 
-__all__ = ["packer"]
+__all__ = ["RotamerPacker"]

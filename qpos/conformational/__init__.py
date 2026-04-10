@@ -1,5 +1,6 @@
 """Conformational Module."""
 
-from qpos.conformational import fold_switch_qubo, nma_sampler, qicess_scorer
+from qpos.conformational.nma_sampler import ConformationalSampler
+from qpos.conformational.qicess_scorer import QICESSScorer
 
-__all__ = ["fold_switch_qubo", "nma_sampler", "qicess_scorer"]
+__all__ = ["ConformationalSampler", "QICESSScorer"]
