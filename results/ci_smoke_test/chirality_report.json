@@ -1,3 +1,19 @@
 {
-  "error": "'str' object has no attribute 'get_level'"
+  "chirality": {
+    "pct_correct": 100.0,
+    "n_wrong": 0,
+    "n_gly": 0
+  },
+  "ramachandran": {
+    "pct_favored": 100.0,
+    "pct_allowed": 0.0,
+    "pct_outlier": 0.0
+  },
+  "planarity": {
+    "pct_within_6deg": 99.0
+  },
+  "clashes": {
+    "clash_score": 0.0
+  },
+  "overall_score": 100.0
 }
