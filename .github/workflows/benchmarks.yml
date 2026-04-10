@@ -1,0 +1,219 @@
+name: Full Benchmark Evaluation
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:  # Allow manual trigger from GitHub UI
+
+jobs:
+  disorder-benchmark:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install
+        run: pip install -e .
+      - name: Run DisorderNet benchmark (CPU, v6)
+        run: python benchmarks/disorder/run.py --fast
+        # --fast flag uses a 500-sequence DisProt subset, not full dataset
+        # Full dataset (~10k sequences) is too slow for CI
+      - name: Assert AUC >= 0.820
+        run: |
+          python -c "
+          import json
+          with open('benchmarks/disorder/results/metrics.json') as f:
+              m = json.load(f)
+          auc = m['auc_roc']
+          assert auc >= 0.820, f'DisorderNet AUC {auc:.3f} below threshold 0.820'
+          print(f'PASS: DisorderNet AUC = {auc:.3f}')
+          "
+      - name: Upload disorder results
+        uses: actions/upload-artifact@v4
+        with:
+          name: disorder-benchmark-results
+          path: benchmarks/disorder/results/
+
+  chirality-benchmark:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install
+        run: pip install -e .
+      - name: Run ChiralFold validation (31 PDB structures)
+        run: python benchmarks/chirality/run.py
+        # Uses fixture PDB files in tests/fixtures/ — no network calls
+      - name: Assert chirality correctness >= 96%
+        run: |
+          python -c "
+          import json
+          with open('benchmarks/chirality/results/audit_summary.json') as f:
+              m = json.load(f)
+          pct = m['mean_chirality_pct_correct']
+          assert pct >= 96.0, f'Chirality correctness {pct:.1f}% below 96%'
+          n_structures = m['n_structures_at_100pct']
+          assert n_structures >= 28, f'Only {n_structures}/31 structures at 100% — expected >=28'
+          print(f'PASS: Chirality {pct:.1f}%, {n_structures}/31 at 100%')
+          "
+      - name: Upload chirality results
+        uses: actions/upload-artifact@v4
+        with:
+          name: chirality-benchmark-results
+          path: benchmarks/chirality/results/
+
+  rotamer-benchmark:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install
+        run: pip install -e .
+      - name: Run IWS-QAOA rotamer packing benchmark
+        run: python benchmarks/rotamer_packing/run.py
+        # SK-glass instances at N=4 and N=5. Runs fast (<5 min).
+      - name: Assert IWS-QAOA beats greedy on SK-glass instances
+        run: |
+          python -c "
+          import json
+          with open('benchmarks/rotamer_packing/results/comparison_table.json') as f:
+              m = json.load(f)
+          for instance in m['instances']:
+              greedy_gap = instance['greedy_gap_pct']
+              iws_gap = instance['iws_qaoa_gap_pct']
+              name = instance['name']
+              assert iws_gap <= greedy_gap, (
+                  f'{name}: IWS-QAOA gap {iws_gap:.1f}% > greedy gap {greedy_gap:.1f}%'
+              )
+              print(f'PASS {name}: IWS {iws_gap:.1f}% <= greedy {greedy_gap:.1f}%')
+          "
+      - name: Upload rotamer results
+        uses: actions/upload-artifact@v4
+        with:
+          name: rotamer-benchmark-results
+          path: benchmarks/rotamer_packing/results/
+
+  autoinhibited-benchmark:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install
+        run: pip install -e .
+      - name: Run QICESS 22-protein autoinhibited benchmark
+        run: python benchmarks/autoinhibited/run.py
+        # Uses calibrated simulations — no real AF3 inference needed
+      - name: Assert QICESS beats AF3 on imfdRMSD
+        run: |
+          python -c "
+          import json
+          with open('benchmarks/autoinhibited/results/stats.json') as f:
+              m = json.load(f)
+          qicess_frac = m['qicess_frac_below_3A']
+          af3_frac = m['af3_frac_below_3A']
+          p_value = m['wilcoxon_p_qicess_vs_af3']
+          assert qicess_frac > af3_frac, (
+              f'QICESS {qicess_frac:.2f} not better than AF3 {af3_frac:.2f}'
+          )
+          assert p_value < 0.05, f'Wilcoxon p={p_value:.4f} not significant'
+          print(f'PASS: QICESS {qicess_frac:.0%} vs AF3 {af3_frac:.0%}, p={p_value:.4f}')
+          "
+      - name: Upload autoinhibited results
+        uses: actions/upload-artifact@v4
+        with:
+          name: autoinhibited-benchmark-results
+          path: benchmarks/autoinhibited/results/
+
+  pipeline-smoke-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install
+        run: pip install -e .
+      - name: Run end-to-end pipeline (ubiquitin, fixture PDB)
+        run: |
+          python scripts/run_full_pipeline.py \
+            --pdb tests/fixtures/1UBQ.pdb \
+            --output results/ci_smoke_test/ \
+            --no-network
+      - name: Assert all output files exist
+        run: |
+          python -c "
+          import os
+          required = [
+              'results/ci_smoke_test/structure.pdb',
+              'results/ci_smoke_test/disorder_scores.csv',
+              'results/ci_smoke_test/chirality_report.json',
+              'results/ci_smoke_test/qadf_score.json',
+              'results/ci_smoke_test/summary.txt',
+          ]
+          for f in required:
+              assert os.path.exists(f), f'Missing output: {f}'
+              assert os.path.getsize(f) > 0, f'Empty output: {f}'
+          print('PASS: All pipeline outputs present and non-empty')
+          "
+      - name: Assert simulation disclaimer was printed
+        run: |
+          python -c "
+          import io, sys
+          from contextlib import redirect_stdout
+          f = io.StringIO()
+          with redirect_stdout(f):
+              import qpos.quantum
+          output = f.getvalue()
+          assert 'CLASSICALLY SIMULATED' in output, 'Simulation disclaimer not printed'
+          print('PASS: Simulation disclaimer present')
+          "
+      - name: Upload pipeline outputs
+        uses: actions/upload-artifact@v4
+        with:
+          name: pipeline-smoke-test-outputs
+          path: results/ci_smoke_test/
+
+  generate-report:
+    runs-on: ubuntu-latest
+    needs:
+      - disorder-benchmark
+      - chirality-benchmark
+      - rotamer-benchmark
+      - autoinhibited-benchmark
+      - pipeline-smoke-test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install
+        run: pip install -e .
+
+      - name: Download all benchmark artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+
+      - name: Generate consolidated benchmark report
+        run: |
+          python scripts/generate_ci_report.py \
+            --artifacts-dir artifacts/ \
+            --output reports/benchmark_report.md \
+            --commit-sha ${{ github.sha }} \
+            --run-id ${{ github.run_id }}
+
+      - name: Upload consolidated report
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-report
+          path: reports/benchmark_report.md
+
+      - name: Post report summary to job
+        run: cat reports/benchmark_report.md >> $GITHUB_STEP_SUMMARY
