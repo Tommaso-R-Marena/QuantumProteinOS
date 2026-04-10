@@ -26,8 +26,6 @@ jobs:
         run: pip install -e ".[ml,dev]"
       - name: Run DisorderNet full benchmark
         run: python benchmarks/disorder/run.py --full
-        # 80/20 stratified split on entire DisProt CAID3.
-        # This is the AUC that goes in the paper.
       - name: Assert AUC >= 0.82
         run: |
           python -c "
@@ -62,9 +60,6 @@ jobs:
           pip install requests
       - name: Run rotamer full benchmark (real PDB QUBOs)
         run: python benchmarks/rotamer_packing/run.py --full
-        # Builds real LJ-clash rotamer QUBOs from 8 crystallographic PDB structures.
-        # IWS-QAOA must beat greedy on every instance.
-        # This is the result that goes in the paper.
       - name: Assert IWS-QAOA beats greedy on all real instances
         run: |
           python -c "
@@ -100,12 +95,53 @@ jobs:
       - name: Install dependencies
         run: |
           pip install -e .
-          pip install requests
+          pip install requests biopython
+
+      # ------------------------------------------------------------------
+      # Network connectivity check — diagnose before we try to download
+      # ------------------------------------------------------------------
+      - name: Debug network access to AlphaFold DB
+        run: |
+          echo "=== curl HEAD test ==="
+          curl -v --max-time 15 -o /dev/null \
+            https://alphafold.ebi.ac.uk/files/AF-P12931-F1-model_v4.cif \
+            2>&1 | head -40 || true
+
+      # ------------------------------------------------------------------
+      # Pre-download all 22 AF mmCIF structures via curl.
+      # curl uses the system CA bundle and does not go through Python's
+      # requests/urllib3 SSL stack, which can behave differently in CI.
+      # Files land in tests/fixtures/alphafold/ where run.py will find
+      # them as cached hits (skipping HTTP entirely).
+      # ------------------------------------------------------------------
+      - name: Pre-download AlphaFold mmCIF fixtures
+        run: |
+          mkdir -p tests/fixtures/alphafold
+          BASE="https://alphafold.ebi.ac.uk/files"
+          # List: UniProt IDs used in FULL_AUTOINHIBITED_DATA
+          IDS="P12931 P42768 P16333 Q9BYF1 Q8IYH5 P07947 P00533 P00519 P15056 P04049 P17612 P19784 P45983 Q16539 P27361 Q05397 P36888 P07333 P10721 P04629 P06241"
+          for ID in $IDS; do
+            OUT="tests/fixtures/alphafold/AF_${ID}_v4.cif"
+            if [ ! -f "$OUT" ]; then
+              echo "Downloading AF-${ID}-F1-model_v4.cif ..."
+              curl --silent --max-time 60 --retry 3 --retry-delay 5 \
+                -o "$OUT" \
+                "${BASE}/AF-${ID}-F1-model_v4.cif" \
+                || (echo "v4 failed, trying v3..."; \
+                    curl --silent --max-time 60 --retry 2 \
+                    -o "$OUT" \
+                    "${BASE}/AF-${ID}-F1-model_v3.cif" \
+                    || echo "WARNING: could not download AF-${ID}")
+              # Remove empty files (404 responses)
+              [ -s "$OUT" ] || rm -f "$OUT"
+            fi
+          done
+          echo "=== Downloaded fixtures ==="
+          ls -lh tests/fixtures/alphafold/ || echo "(none)"
+
       - name: Run QICESS full benchmark (22 proteins, real AF structures)
         run: python benchmarks/autoinhibited/run.py --full
-        # Downloads real AlphaFold v4 predicted structures from EBI for each protein.
-        # Compares QICESS imfdRMSD against real AF predictions — NOT synthetic noise.
-        # This is the result that goes in the paper.
+
       - name: Assert QICESS beats real AlphaFold on imfdRMSD
         run: |
           python -c "
