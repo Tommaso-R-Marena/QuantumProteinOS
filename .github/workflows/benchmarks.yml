@@ -3,7 +3,7 @@ name: Full Benchmark Evaluation
 on:
   push:
     branches: [main]
-  workflow_dispatch:  # Allow manual trigger from GitHub UI
+  workflow_dispatch:
 
 jobs:
   disorder-benchmark:
@@ -20,19 +20,20 @@ jobs:
           key: esm2-t6-8M-UR50D-weights
       - name: Install dependencies
         run: pip install -e ".[ml,dev]"
-      - name: Run DisorderNet benchmark (CPU, v6)
+      - name: Run DisorderNet benchmark (fast smoke test)
         run: python benchmarks/disorder/run.py --fast
-        # --fast flag uses a 500-sequence DisProt subset, not full dataset
-        # Full dataset benchmark runs monthly via full-benchmark.yml
-      - name: Assert AUC >= 0.65 (fast mode smoke test)
+        # 350 train / 150 test from 500-seq DisProt subset.
+        # Confirms pipeline runs end-to-end. NOT the paper AUC.
+        # Full scientific run: full-benchmark.yml (monthly).
+      - name: Assert AUC >= 0.65
         run: |
           python -c "
           import json
           with open('benchmarks/disorder/results/metrics.json') as f:
               m = json.load(f)
           auc = m['auc_roc']
-          assert auc >= 0.65, f'DisorderNet AUC {auc:.3f} below threshold 0.65 (fast smoke test)'
-          print(f'PASS: DisorderNet AUC = {auc:.3f}')
+          assert auc >= 0.65, f'DisorderNet AUC {auc:.3f} below threshold 0.65'
+          print(f'PASS: DisorderNet AUC = {auc:.3f} (smoke test)')
           "
       - name: Upload disorder results
         uses: actions/upload-artifact@v4
@@ -65,7 +66,8 @@ jobs:
           "
       - name: Run ChiralFold validation (31 PDB structures)
         run: python benchmarks/chirality/run.py
-        # Uses fixture PDB files in tests/fixtures/ — no network calls
+        # SCIENTIFIC RESULT: runs on all 31 real crystal structures every push.
+        # No full/smoke split needed — this is already the full benchmark.
       - name: Assert chirality correctness >= 96%
         run: |
           python -c "
@@ -93,10 +95,12 @@ jobs:
           python-version: "3.11"
       - name: Install
         run: pip install -e .
-      - name: Run IWS-QAOA rotamer packing benchmark
-        run: python benchmarks/rotamer_packing/run.py
-        # SK-glass instances at N=4 and N=5. Runs fast (<5 min).
-      - name: Assert IWS-QAOA beats greedy on SK-glass instances
+      - name: Run IWS-QAOA rotamer packing benchmark (smoke test)
+        run: python benchmarks/rotamer_packing/run.py --fast
+        # Synthetic deterministic QUBOs N=4 and N=5.
+        # Confirms solver runs. NOT the paper number.
+        # Full scientific run on real PDB rotamer QUBOs: full-benchmark.yml (monthly).
+      - name: Assert IWS-QAOA beats greedy on synthetic instances
         run: |
           python -c "
           import json
@@ -140,10 +144,12 @@ jobs:
                   f.write(r.text)
           print('Fixtures downloaded.')
           "
-      - name: Run QICESS 22-protein autoinhibited benchmark
-        run: python benchmarks/autoinhibited/run.py
-        # Uses calibrated simulations — no real AF3 inference needed
-      - name: Assert QICESS beats AF3 on imfdRMSD
+      - name: Run QICESS autoinhibited benchmark (smoke test)
+        run: python benchmarks/autoinhibited/run.py --fast
+        # 5 proteins, Gaussian noise as synthetic AF3 proxy.
+        # Confirms QICESS scorer runs. NOT the paper number.
+        # Full scientific run on 22 proteins with real AF structures: full-benchmark.yml (monthly).
+      - name: Assert QICESS beats AF3 proxy on imfdRMSD
         run: |
           python -c "
           import json
@@ -156,7 +162,7 @@ jobs:
               f'QICESS {qicess_frac:.2f} not better than AF3 {af3_frac:.2f}'
           )
           assert p_value < 0.05, f'Wilcoxon p={p_value:.4f} not significant'
-          print(f'PASS: QICESS {qicess_frac:.0%} vs AF3 {af3_frac:.0%}, p={p_value:.4f}')
+          print(f'PASS: QICESS {qicess_frac:.0%} vs AF3 proxy {af3_frac:.0%}, p={p_value:.4f} (smoke test)')
           "
       - name: Upload autoinhibited results
         uses: actions/upload-artifact@v4
@@ -242,12 +248,10 @@ jobs:
           python-version: "3.11"
       - name: Install
         run: pip install -e .
-
       - name: Download all benchmark artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts/
-
       - name: Generate consolidated benchmark report
         run: |
           python scripts/generate_ci_report.py \
@@ -255,12 +259,10 @@ jobs:
             --output reports/benchmark_report.md \
             --commit-sha ${{ github.sha }} \
             --run-id ${{ github.run_id }}
-
       - name: Upload consolidated report
         uses: actions/upload-artifact@v4
         with:
           name: benchmark-report
           path: reports/benchmark_report.md
-
       - name: Post report summary to job
         run: cat reports/benchmark_report.md >> $GITHUB_STEP_SUMMARY

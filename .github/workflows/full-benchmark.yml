@@ -1,4 +1,4 @@
-name: Full Disorder Benchmark (Monthly)
+name: Full Scientific Benchmark (Monthly)
 
 on:
   schedule:
@@ -6,45 +6,163 @@ on:
   workflow_dispatch:     # Manual trigger from GitHub UI
 
 jobs:
+  # -------------------------------------------------------------------------
+  # 1. DisorderNet — full DisProt CAID3, AUC threshold 0.82
+  # -------------------------------------------------------------------------
   disorder-full:
     runs-on: ubuntu-latest
-    timeout-minutes: 340  # ~5.5 hours, under 6-hour hard limit
+    timeout-minutes: 340
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-
       - name: Cache ESM model weights
         uses: actions/cache@v4
         with:
           path: ~/.cache/torch/hub
           key: esm2-t6-8M-UR50D-weights
-
       - name: Install dependencies
         run: pip install -e ".[ml,dev]"
-
-      - name: Run DisorderNet benchmark (full dataset)
+      - name: Run DisorderNet full benchmark
         run: python benchmarks/disorder/run.py --full
-        # Full mode: 80/20 stratified split on entire DisProt CAID3 dataset
-        # Expected runtime: 30-90 min on 2-core CPU depending on dataset size
-        # This is the number that goes in the paper.
-
-      - name: Assert AUC >= 0.82 (full mode)
+        # 80/20 stratified split on entire DisProt CAID3.
+        # This is the AUC that goes in the paper.
+      - name: Assert AUC >= 0.82
         run: |
           python -c "
           import json
           with open('benchmarks/disorder/results/metrics.json') as f:
               m = json.load(f)
           auc = m['auc_roc']
-          assert auc >= 0.82, f'DisorderNet full-mode AUC {auc:.3f} below threshold 0.82'
-          print(f'PASS: DisorderNet full-mode AUC = {auc:.3f}')
+          assert auc >= 0.82, f'DisorderNet full AUC {auc:.3f} below 0.82'
+          print(f'PASS: DisorderNet full AUC = {auc:.3f}')
           "
-
-      - name: Upload full benchmark results
+      - name: Upload results
         uses: actions/upload-artifact@v4
         with:
-          name: disorder-full-benchmark-${{ github.run_id }}
+          name: disorder-full-${{ github.run_id }}
           path: benchmarks/disorder/results/
           retention-days: 90
+
+  # -------------------------------------------------------------------------
+  # 2. Rotamer IWS-QAOA — real PDB rotamer QUBOs (8 proteins)
+  # -------------------------------------------------------------------------
+  rotamer-full:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: |
+          pip install -e .
+          pip install requests
+      - name: Run rotamer full benchmark (real PDB QUBOs)
+        run: python benchmarks/rotamer_packing/run.py --full
+        # Builds real LJ-clash rotamer QUBOs from 8 crystallographic PDB structures.
+        # IWS-QAOA must beat greedy on every instance.
+        # This is the result that goes in the paper.
+      - name: Assert IWS-QAOA beats greedy on all real instances
+        run: |
+          python -c "
+          import json
+          with open('benchmarks/rotamer_packing/results/comparison_table.json') as f:
+              m = json.load(f)
+          real_instances = [i for i in m['instances'] if i.get('real_data', False)]
+          assert len(real_instances) >= 6, f'Only {len(real_instances)} real instances (expected >=6)'
+          for inst in real_instances:
+              assert inst['iws_qaoa_gap_pct'] <= inst['greedy_gap_pct'], (
+                  f"{inst['name']}: IWS gap {inst['iws_qaoa_gap_pct']:.1f}% > greedy gap {inst['greedy_gap_pct']:.1f}%"
+              )
+              print(f\"PASS {inst['name']} (N={inst['N_residues']}): IWS {inst['iws_qaoa_gap_pct']:.1f}% <= greedy {inst['greedy_gap_pct']:.1f}%\")
+          "
+      - name: Upload results
+        uses: actions/upload-artifact@v4
+        with:
+          name: rotamer-full-${{ github.run_id }}
+          path: benchmarks/rotamer_packing/results/
+          retention-days: 90
+
+  # -------------------------------------------------------------------------
+  # 3. QICESS autoinhibited — 22 proteins, real AlphaFold structures
+  # -------------------------------------------------------------------------
+  autoinhibited-full:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: |
+          pip install -e .
+          pip install requests
+      - name: Run QICESS full benchmark (22 proteins, real AF structures)
+        run: python benchmarks/autoinhibited/run.py --full
+        # Downloads real AlphaFold v4 predicted structures from EBI for each protein.
+        # Compares QICESS imfdRMSD against real AF predictions — NOT synthetic noise.
+        # This is the result that goes in the paper.
+      - name: Assert QICESS beats real AlphaFold on imfdRMSD
+        run: |
+          python -c "
+          import json
+          with open('benchmarks/autoinhibited/results/stats.json') as f:
+              m = json.load(f)
+          assert m['real_af_comparison'] == True, 'Full mode must use real AF structures'
+          assert m['n_structures'] >= 18, f\"Only {m['n_structures']} structures processed (expected >=18)\"
+          qicess_frac = m['qicess_frac_below_3A']
+          af3_frac = m['af3_frac_below_3A']
+          p_value = m['wilcoxon_p_qicess_vs_af3']
+          assert qicess_frac > af3_frac, (
+              f'QICESS {qicess_frac:.2f} not better than AF {af3_frac:.2f}'
+          )
+          assert p_value < 0.05, f'Wilcoxon p={p_value:.4f} not significant'
+          print(f'PASS: QICESS {qicess_frac:.0%} vs AF {af3_frac:.0%}, p={p_value:.4f} ({m[\"n_structures\"]} structures)')
+          "
+      - name: Upload results
+        uses: actions/upload-artifact@v4
+        with:
+          name: autoinhibited-full-${{ github.run_id }}
+          path: benchmarks/autoinhibited/results/
+          retention-days: 90
+
+  # -------------------------------------------------------------------------
+  # Generate consolidated scientific report
+  # -------------------------------------------------------------------------
+  generate-full-report:
+    runs-on: ubuntu-latest
+    needs:
+      - disorder-full
+      - rotamer-full
+      - autoinhibited-full
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install
+        run: pip install -e .
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+      - name: Generate full scientific report
+        run: |
+          python scripts/generate_ci_report.py \
+            --artifacts-dir artifacts/ \
+            --output reports/full_benchmark_report.md \
+            --commit-sha ${{ github.sha }} \
+            --run-id ${{ github.run_id }} \
+            --full-mode
+      - name: Upload report
+        uses: actions/upload-artifact@v4
+        with:
+          name: full-benchmark-report-${{ github.run_id }}
+          path: reports/full_benchmark_report.md
+          retention-days: 90
+      - name: Post summary
+        run: cat reports/full_benchmark_report.md >> $GITHUB_STEP_SUMMARY
