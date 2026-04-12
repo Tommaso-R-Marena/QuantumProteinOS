@@ -71,33 +71,64 @@ def download_pdb(pdb_id, dest_dir):
 
 def download_af_structure_cif(uniprot_id, dest_dir):
     """
-    Download AlphaFold predicted structure in mmCIF format from EBI AlphaFold DB.
-    PDB format endpoint is deprecated; mmCIF is the supported format.
-    Tries model versions v4 -> v3 -> v2.
-    Returns (cif_path, version) or (None, None) if all fail.
+    Download AlphaFold predicted structure in mmCIF format.
+
+    Uses the AFDB v6 REST API (launched Oct 2025) to resolve the current
+    download URL, then fetches the CIF file. The old direct-file URL format
+    (AF-{id}-F1-model_v{n}.cif) returns 404 since AFDB v6 and is sunset
+    25 June 2026 per EBI announcement.
+
+    API endpoint: GET /api/prediction/{uniprot_id}
+    Returns JSON list; entry[0]['cifUrl'] is the canonical download URL.
+
+    Returns (cif_path, version_string) or (None, None) on failure.
     """
     dest_dir_af = os.path.join(dest_dir, 'alphafold')
     os.makedirs(dest_dir_af, exist_ok=True)
 
-    for version in [4, 3, 2]:
-        dest_path = os.path.join(dest_dir_af, f"AF_{uniprot_id}_v{version}.cif")
-        if os.path.exists(dest_path):
-            return dest_path, version
-        url = f"https://alphafold.ebi.ac.uk/files/AF-{uniprot_id}-F1-model_v{version}.cif"
-        try:
-            r = requests.get(url, timeout=60)
-            if r.status_code == 404:
-                continue
-            r.raise_for_status()
-            with open(dest_path, 'w') as f:
-                f.write(r.text)
-            print(f"  Downloaded AF-{uniprot_id} v{version} (mmCIF)")
-            return dest_path, version
-        except Exception as e:
-            print(f"  AF mmCIF download error {uniprot_id} v{version}: {e}")
-            continue
+    # Check cache first (v6 canonical filename)
+    cached = os.path.join(dest_dir_af, f"AF_{uniprot_id}_v6.cif")
+    if os.path.exists(cached) and os.path.getsize(cached) > 1000:
+        return cached, 'v6-cached'
 
-    return None, None
+    # Step 1: API lookup to get current CIF URL
+    api_url = f"https://alphafold.ebi.ac.uk/api/prediction/{uniprot_id}"
+    try:
+        r = requests.get(api_url, timeout=30)
+        r.raise_for_status()
+        data = r.json()
+    except Exception as e:
+        print(f"  AF API lookup failed for {uniprot_id}: {e}")
+        return None, None
+
+    if not data:
+        print(f"  AF API returned empty response for {uniprot_id}")
+        return None, None
+
+    entry = data[0]
+    cif_url = entry.get('cifUrl') or entry.get('mmcifUrl')
+    if not cif_url:
+        print(f"  AF API response missing cifUrl for {uniprot_id}. Keys: {list(entry.keys())}")
+        return None, None
+
+    # Extract version string from URL for provenance
+    version_str = 'v6'
+    for part in cif_url.split('-'):
+        if part.startswith('v') and part[1:].isdigit():
+            version_str = part
+            break
+
+    # Step 2: Download CIF
+    try:
+        r2 = requests.get(cif_url, timeout=60)
+        r2.raise_for_status()
+        with open(cached, 'w') as f:
+            f.write(r2.text)
+        print(f"  Downloaded AF-{uniprot_id} {version_str} via AFDB v6 API ({len(r2.text)//1024} KB)")
+        return cached, version_str
+    except Exception as e:
+        print(f"  AF CIF download error {uniprot_id}: {e}")
+        return None, None
 
 
 def get_ca_coords_from_cif(cif_path):
@@ -171,17 +202,16 @@ def process_entry(entry, fixture_dir, use_real_af):
                     inhibitory_indices
                 )
                 af_used_real = True
-                print(f"  {pdb_id} ({uniprot_id}): QICESS={q_msd:.3f} | AF-v{af_version}={a_msd:.3f} [REAL AF mmCIF]")
+                print(f"  {pdb_id} ({uniprot_id}): QICESS={q_msd:.3f} | AF-{af_version}={a_msd:.3f} [REAL AF mmCIF]")
             else:
                 print(f"  {pdb_id}: AF struct too short ({min_len} res), using noise fallback.")
                 perturbed = noise_fallback(crystal_coords, inhibitory_indices)
                 a_msd = imfdrMSD(perturbed, crystal_coords, inhibitory_indices)
         else:
-            print(f"  {pdb_id}: No AF mmCIF found for {uniprot_id} (v2/v3/v4 all 404), using noise fallback.")
+            print(f"  {pdb_id}: AF download failed for {uniprot_id}, using noise fallback.")
             perturbed = noise_fallback(crystal_coords, inhibitory_indices)
             a_msd = imfdrMSD(perturbed, crystal_coords, inhibitory_indices)
     else:
-        # Smoke test: synthetic noise proxy. NOT a real AF comparison.
         perturbed = noise_fallback(crystal_coords, inhibitory_indices)
         a_msd = imfdrMSD(perturbed, crystal_coords, inhibitory_indices)
         print(f"  {pdb_id}: QICESS={q_msd:.3f} | noise-proxy={a_msd:.3f} [SMOKE TEST]")
@@ -208,6 +238,7 @@ def main():
     mode = 'full' if args.full else 'smoke'
 
     print(f"Running QICESS autoinhibited benchmark ({mode}, {len(dataset)} proteins, real_af={use_real_af})...")
+    print(f"AF download method: AFDB v6 REST API (post-Oct 2025)")
 
     fixture_dir = "tests/fixtures"
     os.makedirs(fixture_dir, exist_ok=True)
@@ -262,6 +293,7 @@ def main():
     with open('benchmarks/autoinhibited/results/stats.json', 'w') as f:
         json.dump({
             'mode': mode,
+            'af_download_method': 'AFDB_v6_REST_API',
             'n_structures': total,
             'n_real_af_structures': n_real_af,
             'real_af_comparison': n_real_af >= total // 2,
